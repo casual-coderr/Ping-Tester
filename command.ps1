@@ -100,8 +100,8 @@ foreach ($provider in $dnsProviders) {
 Write-Host "`n=== RESULTS ===" -ForegroundColor Cyan
 $allResults | Sort-Object AvgAllSites | Format-Table Provider, PrimaryDNS, AvgAllSites -AutoSize
 
-$best = $allResults | Sort-Object AvgAllSites | Select-Object -First 1
-$bestSecondary = ($dnsProviders | Where-Object { $_.Name -eq $best.Provider }).Secondary
+$rankedResults = $allResults | Sort-Object AvgAllSites
+$best = $rankedResults | Select-Object -First 1
 
 # Show if best is actually better than baseline
 $diff = $baselineAvg - $best.AvgAllSites
@@ -111,21 +111,49 @@ if ($diff -gt 0) {
     Write-Host "BEST: Your current DNS is already optimal at ${baselineAvg}ms" -ForegroundColor Green
 }
 
-# ── Auto-apply ───────────────────────────────────────────────────────────────
-if ($best.Provider -notlike "Current*") {
-    $apply = Read-Host "`nApply $($best.Provider) as your DNS? (y/n)"
-    if ($apply -eq 'y') {
-        Set-DnsClientServerAddress -InterfaceAlias $adapterName `
-            -ServerAddresses @($best.PrimaryDNS, $bestSecondary)
-        Clear-DnsClientCache
-        Write-Host "Applied. DNS is now $($best.Provider)." -ForegroundColor Green
-    } else {
-        # Restore original DNS if user declines
+# ── Choose and apply ────────────────────────────────────────────────────────
+Write-Host "`nChoose a DNS provider to apply:" -ForegroundColor Cyan
+for ($i = 0; $i -lt $rankedResults.Count; $i++) {
+    $entry = $rankedResults[$i]
+    Write-Host ("  [{0}] {1} ({2}ms)" -f ($i + 1), $entry.Provider, $entry.AvgAllSites)
+}
+
+$defaultChoice = 1
+$choiceInput = Read-Host "Enter number to apply (default $defaultChoice = fastest, 0 = keep current)"
+
+$choice = if ([string]::IsNullOrWhiteSpace($choiceInput)) {
+    $defaultChoice
+} elseif ($choiceInput -match '^\d+$') {
+    [int]$choiceInput
+} else {
+    -1
+}
+
+if ($choice -eq 0) {
+    Set-DnsClientServerAddress -InterfaceAlias $adapterName `
+        -ServerAddresses $currentDNS
+    Clear-DnsClientCache
+    Write-Host "Kept your original DNS settings." -ForegroundColor Gray
+} elseif ($choice -ge 1 -and $choice -le $rankedResults.Count) {
+    $selected = $rankedResults[$choice - 1]
+
+    if ($selected.Provider -like "Current*") {
         Set-DnsClientServerAddress -InterfaceAlias $adapterName `
             -ServerAddresses $currentDNS
         Clear-DnsClientCache
-        Write-Host "Restored your original DNS." -ForegroundColor Gray
+        Write-Host "Applied your original DNS settings." -ForegroundColor Gray
+    } else {
+        $selectedProvider = $dnsProviders | Where-Object { $_.Name -eq $selected.Provider } | Select-Object -First 1
+        Set-DnsClientServerAddress -InterfaceAlias $adapterName `
+            -ServerAddresses @($selectedProvider.Primary, $selectedProvider.Secondary)
+        Clear-DnsClientCache
+        Write-Host "Applied. DNS is now $($selected.Provider)." -ForegroundColor Green
     }
+} else {
+    Set-DnsClientServerAddress -InterfaceAlias $adapterName `
+        -ServerAddresses $currentDNS
+    Clear-DnsClientCache
+    Write-Host "Invalid choice. Restored your original DNS settings." -ForegroundColor Yellow
 }
 
 Write-Host "`nTo revert to auto DNS:" -ForegroundColor DarkGray
