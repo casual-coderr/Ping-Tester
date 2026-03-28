@@ -19,6 +19,20 @@ $testSites = @(
 $adapterName = "WiFi"
 $pingCount   = 5
 
+function Get-FilteredAverageMs {
+    param(
+        [Parameter(Mandatory)]
+        [array]$SiteResults
+    )
+
+    $valid = $SiteResults | Where-Object { $_.AvgPing -lt 9999 }
+    if (-not $valid) {
+        return 9999
+    }
+
+    return [math]::Round(($valid | Measure-Object AvgPing -Average).Average, 1)
+}
+
 Write-Host "`nDNS Performance Tester" -ForegroundColor Cyan
 Write-Host "Adapter: $adapterName  |  Pings per site: $pingCount`n" -ForegroundColor DarkGray
 
@@ -39,7 +53,7 @@ foreach ($site in $testSites) {
     $baselineSites += [PSCustomObject]@{ Site = $site; AvgPing = $avgPing }
     Write-Host "  $site : ${avgPing}ms" -ForegroundColor DarkGray
 }
-$baselineAvg = [math]::Round(($baselineSites | Measure-Object AvgPing -Average).Average, 1)
+$baselineAvg = Get-FilteredAverageMs -SiteResults $baselineSites
 Write-Host "  → Baseline average: ${baselineAvg}ms`n" -ForegroundColor Magenta
 
 $allResults = @()
@@ -72,7 +86,7 @@ foreach ($provider in $dnsProviders) {
         Write-Host "  $site : ${avgPing}ms" -ForegroundColor DarkGray
     }
 
-    $totalAvg = [math]::Round(($siteResults | Measure-Object AvgPing -Average).Average, 1)
+    $totalAvg = Get-FilteredAverageMs -SiteResults $siteResults
     $allResults += [PSCustomObject]@{
         Provider    = $provider.Name
         PrimaryDNS  = $provider.Primary
